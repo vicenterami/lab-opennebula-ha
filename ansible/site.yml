@@ -1,59 +1,131 @@
 ---
-- name: Configuración Base del Sistema Operativo
+# =============================================================================
+# PLAYBOOK PRINCIPAL — Lab OpenNebula HA
+# Orden de ejecución: base → NFS → HA frontend → nodos
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# FASE 1: Configuración base del sistema operativo (todos los hosts)
+# ---------------------------------------------------------------------------
+- name: "1/5 — Configuración Base del Sistema Operativo"
   hosts: all
   become: true
   roles:
-    - common # <- Solo ejecuta la base aquí
+    - common
 
-- name: Despliegue del Plano de Control OpenNebula HA
+# ---------------------------------------------------------------------------
+# FASE 2: Servidor NFS en el host (si se corre con -e "run_nfs_server=true")
+# El servidor NFS corre en el HOST FÍSICO, no en las VMs.
+# Este play solo aplica si defines el grupo [nfs_server] con la IP del host.
+# ---------------------------------------------------------------------------
+# (Ver scripts/setup-nfs-host.sh para configurar el NFS en el host físico)
+
+# ---------------------------------------------------------------------------
+# FASE 3: Despliegue del Plano de Control OpenNebula HA
+# ---------------------------------------------------------------------------
+- name: "2/5 — Despliegue Plano de Control HA (Frontend + Keepalived)"
   hosts: frontends
   become: true
   roles:
     - keepalived
     - opennebula-frontend
 
-- name: Capturar Llaves Criptográficas Reales del Servidor Maestro
+# ---------------------------------------------------------------------------
+# FASE 4: Sincronizar llaves criptográficas entre FE1 → FE2 (CRÍTICO para HA)
+# Sin esto, el FE2 no puede asumir el control ni comunicarse con los nodos.
+# ---------------------------------------------------------------------------
+- name: "3/5 — Capturar llaves SSH de oneadmin desde FE1 (Master)"
   hosts: one-fe1
   become: true
   tasks:
-    - name: Slurp de la llave privada autogenerada
+    - name: Leer llave privada autogenerada por OpenNebula
       slurp:
         src: /var/lib/one/.ssh/id_rsa
       register: master_private_key
 
-    - name: Slurp de la llave publica autogenerada
+    - name: Leer llave pública autogenerada por OpenNebula
       slurp:
         src: /var/lib/one/.ssh/id_rsa.pub
       register: master_public_key
 
-- name: Sincronizar Llave Maestra en el Front-end Secundario (Consistencia HA)
+- name: "4/5 — Replicar llave maestra en FE2 (Standby)"
   hosts: one-fe2
   become: true
   tasks:
-    - name: Asegurar que el directorio .ssh de oneadmin exista en FE2
+    - name: Asegurar directorio .ssh de oneadmin en FE2
       file:
         path: /var/lib/one/.ssh
         state: directory
         owner: oneadmin
         group: oneadmin
-        mode: '0700'
+        mode: "0700"
 
-    - name: Inyectar la llave privada idéntica en FE2
+    - name: Copiar llave privada idéntica a FE2
       copy:
         content: "{{ hostvars['one-fe1']['master_private_key']['content'] | b64decode }}"
         dest: /var/lib/one/.ssh/id_rsa
         owner: oneadmin
         group: oneadmin
-        mode: '0600'
+        mode: "0600"
 
-- name: Despliegue del Plano de Cómputo (Hypervisors KVM)
+    - name: Copiar llave pública idéntica a FE2
+      copy:
+        content: "{{ hostvars['one-fe1']['master_public_key']['content'] | b64decode }}"
+        dest: /var/lib/one/.ssh/id_rsa.pub
+        owner: oneadmin
+        group: oneadmin
+        mode: "0644"
+
+    - name: Agregar llave pública al authorized_keys de oneadmin en FE2
+      authorized_key:
+        user: oneadmin
+        key: "{{ hostvars['one-fe1']['master_public_key']['content'] | b64decode }}"
+        state: present
+
+# ---------------------------------------------------------------------------
+# FASE 5: Despliegue del Plano de Cómputo (Hypervisors KVM)
+# ---------------------------------------------------------------------------
+- name: "5/5 — Despliegue Plano de Cómputo (Nodos KVM)"
   hosts: nodes
   become: true
   roles:
     - opennebula-node
 
-- name: Montaje del Almacenamiento Compartido NFS (Fase Final)
+# ---------------------------------------------------------------------------
+# FASE FINAL: Montaje del almacenamiento compartido NFS (todos los hosts)
+# Se hace al final para evitar conflictos con dpkg durante instalación
+# ---------------------------------------------------------------------------
+- name: "FINAL — Montaje Almacenamiento Compartido NFS"
   hosts: all
   become: true
   roles:
-    - nfs-client # <- ¡Fijado aquí al final para evitar conflictos con dpkg!
+    - nfs-client
+
+# ---------------------------------------------------------------------------
+# VERIFICACIÓN: Mostrar resumen del estado del sistema
+# ---------------------------------------------------------------------------
+- name: "VERIFICACIÓN — Estado del clúster OpenNebula"
+  hosts: one-fe1
+  become: true
+  tasks:
+    - name: Verificar estado de oned
+      command: systemctl is-active opennebula
+      register: oned_status
+      ignore_errors: true
+
+    - name: Verificar estado de Keepalived
+      command: systemctl is-active keepalived
+      register: keepalived_status
+      ignore_errors: true
+
+    - name: Mostrar resumen
+      debug:
+        msg:
+          - "========================================="
+          - " Lab OpenNebula HA — Estado del Sistema"
+          - "========================================="
+          - "oned (frontend):    {{ oned_status.stdout }}"
+          - "keepalived (VIP):   {{ keepalived_status.stdout }}"
+          - "VIP Keepalived:     192.168.50.10"
+          - "Sunstone UI:        http://192.168.50.10:9869"
+          - "========================================="

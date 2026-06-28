@@ -1,6 +1,5 @@
 ---
-- name: Restart Keepalived
+- name: Reiniciar libvirtd
   service:
-    name: keepalived
+    name: libvirtd
     state: restarted
-

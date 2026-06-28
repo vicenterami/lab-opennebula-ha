@@ -1,16 +1,44 @@
-vrrp_instance VI_1 {
-    state {{ 'MASTER' if inventory_hostname == 'one-fe1' else 'BACKUP' }}
-    interface {{ ansible_default_ipv4.interface }}
-    virtual_router_id 51
-    priority {{ 101 if inventory_hostname == 'one-fe1' else 100 }}
-    advert_int 1
+# /etc/keepalived/keepalived.conf
+# Generado por Ansible — No editar manualmente
+# VRRP Instance para Alta Disponibilidad del Frontend OpenNebula
+# VIP: 192.168.50.10 (Sunstone accesible via http://192.168.50.10:9869)
+
+global_defs {
+   router_id {{ inventory_hostname }}
+   # Script de verificación de salud cada 2 segundos
+   script_user root
+   enable_script_security
+}
+
+# Script que verifica si el demonio oned está corriendo
+# Si oned muere en el MASTER, Keepalived baja la prioridad y el BACKUP toma la VIP
+vrrp_script check_oned {
+    script "systemctl is-active --quiet opennebula"
+    interval 2      # verificar cada 2 segundos
+    weight  -20     # bajar prioridad 20 puntos si falla
+    fall    2       # fallar después de 2 checks consecutivos fallidos
+    rise    2       # recuperar después de 2 checks exitosos
+}
+
+vrrp_instance VI_ONE {
+    state {{ vrrp_state }}           # MASTER en FE1, BACKUP en FE2
+    interface {{ vrrp_interface }}   # Interfaz detectada automáticamente
+    virtual_router_id 51             # ID único del grupo VRRP (mismo en FE1 y FE2)
+    priority {{ vrrp_priority }}     # MASTER=101, BACKUP=100
+
+    advert_int 1    # anuncio VRRP cada 1 segundo
+    preempt         # si MASTER se recupera, retoma la VIP automáticamente
 
     authentication {
         auth_type PASS
-        auth_pass SecretCloudHA
+        auth_pass one_ha_2024       # contraseña compartida entre FE1 y FE2
     }
 
     virtual_ipaddress {
-        192.168.50.10/24
+        192.168.50.10/24 dev {{ vrrp_interface }}   # IP Flotante
+    }
+
+    track_script {
+        check_oned     # vincular salud de oned al estado VRRP
     }
 }

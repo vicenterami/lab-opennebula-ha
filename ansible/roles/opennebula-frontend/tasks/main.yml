@@ -1,0 +1,71 @@
+---
+- name: Agregar la llave GPG oficial de OpenNebula
+  apt_key:
+    url: https://downloads.opennebula.io/repo/repo2.key
+    state: present
+
+- name: Registrar el repositorio oficial de OpenNebula (Version Community)
+  apt_repository:
+    repo: "deb https://downloads.opennebula.io/repo/6.8/Ubuntu/22.04 stable opennebula"
+    state: present
+    filename: opennebula
+
+- name: Instalar paquetes de OpenNebula Frontend y Sunstone (Interfaz Web)
+  apt:
+    name:
+      - opennebula
+      - opennebula-sunstone
+      - opennebula-gate
+      - opennebula-flow
+    state: present
+    update_cache: yes
+
+- name: Configurar las credenciales basicas de login para la presentacion (one_auth)
+  copy:
+    content: "admin:PasswordCloudHA123\n"
+    dest: /var/lib/one/.one/one_auth
+    owner: oneadmin
+    group: oneadmin
+    mode: '0600'
+
+- name: Modificar oned.conf para habilitar el algoritmo Raft (HA Nativa)
+  blockinfile:
+    path: /etc/one/oned.conf
+    marker: "# {mark} ANSIBLE MANAGED RAFT CLUSTER"
+    block: |
+      FEDERATION = [
+          ZONE_ID = 0,
+          SERVER_ID = {{ 0 if inventory_hostname == 'one-fe1' else 1 }},
+          MASTER_ONED = "http://192.168.50.11:2633/RPC2"
+      ]
+      RAFT = [
+          SERVER_ID = {{ 0 if inventory_hostname == 'one-fe1' else 1 }},
+          LOG_RETENTION = 50000,
+          ELECTION_TIMEOUT_MS = 500,
+          HEARTBEAT_TIMEOUT_MS = 100
+      ]
+      SERVER = [ SERVER_ID = 0, NAME = "one-fe1", ENDPOINT = "http://192.168.50.11:2633/RPC2" ]
+      SERVER = [ SERVER_ID = 1, NAME = "one-fe2", ENDPOINT = "http://192.168.50.12:2633/RPC2" ]
+
+- name: Configurar Sunstone para escuchar en todas las interfaces
+  lineinfile:
+    path: /etc/one/sunstone-server.conf
+    regexp: '^:host:.*'
+    line: ':host: 0.0.0.0'
+
+- name: Asegurar permisos correctos sobre los Datastores compartidos (NFS)
+  file:
+    path: /var/lib/one/datastores
+    owner: oneadmin
+    group: oneadmin
+    state: directory
+    recurse: yes
+
+- name: Habilitar y arrancar servicios del plano de control
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - opennebula
+    - opennebula-sunstone

@@ -1,0 +1,17 @@
+---
+- name: Instalar Keepalived en los Front-ends
+  apt:
+    name: keepalived
+    state: present
+
+- name: Desplegar configuracion dinamica de Keepalived
+  template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+  notify: Restart Keepalived
+
+- name: Asegurar que Keepalived este encendido y habilitado
+  service:
+    name: keepalived
+    state: started
+    enabled: yes

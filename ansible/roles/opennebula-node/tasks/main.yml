@@ -1,0 +1,66 @@
+---
+- name: Agregar la llave GPG oficial de OpenNebula (Nodos)
+  apt_key:
+    url: https://downloads.opennebula.io/repo/repo2.key
+    state: present
+
+- name: Registrar el repositorio oficial de OpenNebula (Nodos)
+  apt_repository:
+    repo: "deb https://downloads.opennebula.io/repo/6.8/Ubuntu/22.04 stable opennebula"
+    state: present
+    filename: opennebula
+
+- name: Instalar el componente de nodo de OpenNebula y dependencias de QEMU/KVM
+  apt:
+    name:
+      - opennebula-node
+      - qemu-kvm
+      - libvirt-daemon-system
+      - bridge-utils
+    state: present
+    update_cache: yes
+
+- name: Asegurar que el servicio libvirtd este encendido y habilitado
+  service: # <- CORREGIDO: Cambiado de systemctl a service para evitar fallos
+    name: libvirtd
+    state: started
+    enabled: yes
+
+- name: Configurar permisos de libvirt para el usuario oneadmin
+  user:
+    name: oneadmin
+    groups: libvirt,kvm
+    append: yes
+
+- name: Crear el directorio .ssh para el usuario oneadmin
+  file:
+    path: /var/lib/one/.ssh
+    state: directory
+    owner: oneadmin
+    group: oneadmin
+    mode: '0700'
+
+- name: Configurar la llave SSH privada real en el nodo de forma dinámica
+  copy:
+    content: "{{ hostvars['one-fe1']['master_private_key']['content'] | b64decode }}"
+    dest: /var/lib/one/.ssh/id_rsa
+    owner: oneadmin
+    group: oneadmin
+    mode: '0600'
+
+- name: Autorizar de forma dinámica la llave publica real del clúster
+  authorized_key: # <- OPTIMIZADO: Módulo nativo para inyección segura de llaves
+    user: oneadmin
+    state: present
+    key: "{{ hostvars['one-fe1']['master_public_key']['content'] | b64decode }}"
+
+- name: Desactivar la verificación estricta de llaves de host para evitar bloqueos en las migraciones
+  copy:
+    content: |
+      Host *
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+    dest: /var/lib/one/.ssh/config
+    owner: oneadmin
+    group: oneadmin
+    mode: '0600'

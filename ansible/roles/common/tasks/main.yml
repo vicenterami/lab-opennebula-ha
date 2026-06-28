@@ -1,0 +1,61 @@
+---
+- name: Esperar a que cloud-init finalice sus tareas iniciales de arranque
+  command: cloud-init status --wait
+  changed_when: false
+  ignore_errors: yes
+
+- name: Asegurar que no existan bloqueos residuales de la base de datos APT
+  shell: |
+    while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+      echo "Esperando a que se libere el bloqueo de la paquetería..."
+      sleep 5
+    done
+  changed_when: false
+
+- name: Actualizar la caché de apt
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Instalar herramientas de administración básicas
+  apt:
+    name:
+      - curl
+      - wget
+      - gnupg2
+      - software-properties-common
+      - rsync
+    state: present
+
+- name: Configurar resolucion de nombres local (/etc/hosts)
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      192.168.50.11 one-fe1
+      192.168.50.12 one-fe2
+      192.168.50.21 one-node1
+      192.168.50.22 one-node2
+
+- name: Actualizar la caché de apt
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Instalar herramientas de administración básicas
+  apt:
+    name:
+      - curl
+      - wget
+      - gnupg2
+      - software-properties-common
+      - rsync
+    state: present
+
+- name: Configurar resolucion de nombres local (/etc/hosts)
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      192.168.50.11 one-fe1
+      192.168.50.12 one-fe2
+      192.168.50.21 one-node1
+      192.168.50.22 one-node2

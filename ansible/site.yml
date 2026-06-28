@@ -1,0 +1,59 @@
+---
+- name: Configuración Base del Sistema Operativo
+  hosts: all
+  become: true
+  roles:
+    - common # <- Solo ejecuta la base aquí
+
+- name: Despliegue del Plano de Control OpenNebula HA
+  hosts: frontends
+  become: true
+  roles:
+    - keepalived
+    - opennebula-frontend
+
+- name: Capturar Llaves Criptográficas Reales del Servidor Maestro
+  hosts: one-fe1
+  become: true
+  tasks:
+    - name: Slurp de la llave privada autogenerada
+      slurp:
+        src: /var/lib/one/.ssh/id_rsa
+      register: master_private_key
+
+    - name: Slurp de la llave publica autogenerada
+      slurp:
+        src: /var/lib/one/.ssh/id_rsa.pub
+      register: master_public_key
+
+- name: Sincronizar Llave Maestra en el Front-end Secundario (Consistencia HA)
+  hosts: one-fe2
+  become: true
+  tasks:
+    - name: Asegurar que el directorio .ssh de oneadmin exista en FE2
+      file:
+        path: /var/lib/one/.ssh
+        state: directory
+        owner: oneadmin
+        group: oneadmin
+        mode: '0700'
+
+    - name: Inyectar la llave privada idéntica en FE2
+      copy:
+        content: "{{ hostvars['one-fe1']['master_private_key']['content'] | b64decode }}"
+        dest: /var/lib/one/.ssh/id_rsa
+        owner: oneadmin
+        group: oneadmin
+        mode: '0600'
+
+- name: Despliegue del Plano de Cómputo (Hypervisors KVM)
+  hosts: nodes
+  become: true
+  roles:
+    - opennebula-node
+
+- name: Montaje del Almacenamiento Compartido NFS (Fase Final)
+  hosts: all
+  become: true
+  roles:
+    - nfs-client # <- ¡Fijado aquí al final para evitar conflictos con dpkg!

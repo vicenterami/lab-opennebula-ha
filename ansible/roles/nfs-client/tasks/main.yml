@@ -1,0 +1,21 @@
+---
+- name: Montar la carpeta NFS compartida desde el Host de la laptop
+  mount:
+    path: /var/lib/one/datastores
+    src: "192.168.50.1:/var/lib/one_shared"
+    fstype: nfs
+    opts: rw,sync,hard,intr
+    state: mounted
+
+- name: Configurar /etc/libvirt/qemu.conf para ejecucion como oneadmin (Requisito Migracion HA)
+  blockinfile:
+    path: /etc/libvirt/qemu.conf
+    block: |
+      user = "oneadmin"
+      group = "oneadmin"
+      dynamic_ownership = 0
+
+- name: Reiniciar libvirtd para aplicar la configuracion de QEMU
+  service:
+    name: libvirtd
+    state: restarted

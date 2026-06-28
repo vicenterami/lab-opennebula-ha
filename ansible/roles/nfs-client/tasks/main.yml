@@ -1,21 +1,47 @@
 ---
-- name: Montar la carpeta NFS compartida desde el Host de la laptop
+- name: Instalar nfs-common
+  apt:
+    name: nfs-common
+    state: present
+    update_cache: yes
+
+- name: Crear directorio de montaje /var/lib/one/datastores
+  file:
+    path: /var/lib/one/datastores
+    state: directory
+    owner: oneadmin
+    group: oneadmin
+    mode: "0755"
+
+- name: Montar NFS desde el host físico (virbr1 = 192.168.50.1)
   mount:
     path: /var/lib/one/datastores
-    src: "192.168.50.1:/var/lib/one_shared"
+    src: "192.168.50.1:/var/lib/one/datastores"
     fstype: nfs
-    opts: rw,sync,hard,intr
+    opts: "rw,sync,hard,intr,timeo=30,retrans=3"
     state: mounted
 
-- name: Configurar /etc/libvirt/qemu.conf para ejecucion como oneadmin (Requisito Migracion HA)
+- name: Verificar que el montaje quedó activo
+  command: mountpoint -q /var/lib/one/datastores
+  register: mount_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Estado del montaje NFS
+  debug:
+    msg: "{{ 'NFS montado OK' if mount_check.rc == 0 else 'FALLO — revisar exportfs en el host' }}"
+
+- name: Configurar /etc/libvirt/qemu.conf para oneadmin (solo nodos)
   blockinfile:
     path: /etc/libvirt/qemu.conf
     block: |
       user = "oneadmin"
       group = "oneadmin"
       dynamic_ownership = 0
+  when: inventory_hostname in groups['nodes']
 
-- name: Reiniciar libvirtd para aplicar la configuracion de QEMU
+- name: Reiniciar libvirtd (solo nodos)
   service:
     name: libvirtd
     state: restarted
+  when: inventory_hostname in groups['nodes']

@@ -3,7 +3,7 @@
   hosts: one-fe1
   become: false
   vars:
-    vnet_name: "vnet-laboratorio"
+    vnet_name: "opennebula-net"
     bridge_interface: "virbr1"
     network_address: "192.168.50.0"
     ip_start: "192.168.50.100"
@@ -78,3 +78,53 @@
     - name: "Imprimir reporte de Datastores Activos"
       debug:
         msg: "{{ datastore_status.stdout_lines }}"
+
+    - name: "Cambiar Datastore System (0) a tipo Shared para Live Migration"
+      ansible.builtin.shell: |
+        oneid=$(sudo -u oneadmin onedatastore show 0 | grep -q "TM_MAD=shared" && echo "ok" || echo "cambiar")
+        if [ "$oneid" = "cambiar" ]; then
+          echo -e "TM_MAD=\"shared\"\nBASE_PATH=\"/var/lib/one/datastores\"" > /tmp/ds0.txt
+          sudo -u oneadmin onedatastore update 0 /tmp/ds0.txt
+          rm -f /tmp/ds0.txt
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: "Cambiar Datastore Default (1) a tipo Shared"
+      ansible.builtin.shell: |
+        oneid=$(sudo -u oneadmin onedatastore show 1 | grep -q "TM_MAD=shared" && echo "ok" || echo "cambiar")
+        if [ "$oneid" = "cambiar" ]; then
+          echo -e "TM_MAD=\"shared\"\nDATASTORE_CAPACITY_CHECK=\"No\"" > /tmp/ds1.txt
+          sudo -u oneadmin onedatastore update 1 /tmp/ds1.txt
+          rm -f /tmp/ds1.txt
+        fi
+      args:
+        executable: /bin/bash
+
+    - name: "Comprobar si el nodo 1 ya está registrado"
+      command: onehost show one-node1
+      register: node1_check
+      failed_when: false
+      changed_when: false
+      become: true
+      become_user: oneadmin
+
+    - name: "Registrar one-node1 de forma automática"
+      command: onehost create one-node1 -i kvm -v kvm
+      become: true
+      become_user: oneadmin
+      when: node1_check.rc != 0
+
+    - name: "Comprobar si el nodo 2 ya está registrado"
+      command: onehost show one-node2
+      register: node2_check
+      failed_when: false
+      changed_when: false
+      become: true
+      become_user: oneadmin
+
+    - name: "Registrar one-node2 de forma automática"
+      command: onehost create one-node2 -i kvm -v kvm
+      become: true
+      become_user: oneadmin
+      when: node2_check.rc != 0

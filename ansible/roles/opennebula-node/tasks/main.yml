@@ -20,17 +20,33 @@
     state: present
     update_cache: yes
 
-- name: Asegurar que el servicio libvirtd este encendido y habilitado
-  service: # <- CORREGIDO: Cambiado de systemctl a service para evitar fallos
-    name: libvirtd
-    state: started
-    enabled: yes
-
 - name: Configurar permisos de libvirt para el usuario oneadmin
   user:
     name: oneadmin
     groups: libvirt,kvm
     append: yes
+
+# ==============================================================================
+# ¡NUEVO! - CORRECCIÓN DE PERMISOS PARA KVM / LIBVIRT
+# ==============================================================================
+- name: Configurar QEMU para correr como el usuario oneadmin
+  lineinfile:
+    path: /etc/libvirt/qemu.conf
+    regexp: '^#?user = .*'
+    line: 'user = "oneadmin"'
+
+- name: Configurar QEMU para correr bajo el grupo oneadmin
+  lineinfile:
+    path: /etc/libvirt/qemu.conf
+    regexp: '^#?group = .*'
+    line: 'group = "oneadmin"'
+# ==============================================================================
+
+- name: Asegurar que el servicio libvirtd este encendido, habilitado y REINICIADO
+  service:
+    name: libvirtd
+    state: restarted # <- Cambiado a restarted para aplicar los cambios de qemu.conf
+    enabled: yes
 
 - name: Crear el directorio .ssh para el usuario oneadmin
   file:
@@ -49,7 +65,7 @@
     mode: '0600'
 
 - name: Autorizar de forma dinámica la llave publica real del clúster
-  authorized_key: # <- OPTIMIZADO: Módulo nativo para inyección segura de llaves
+  authorized_key:
     user: oneadmin
     state: present
     key: "{{ hostvars['one-fe1']['master_public_key']['content'] | b64decode }}"

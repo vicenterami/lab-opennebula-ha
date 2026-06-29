@@ -52,10 +52,10 @@ fi
 
 echo -e "\n${YELLOW}[NFS — Montajes en VMs]${NC}"
 for ip in 192.168.50.11 192.168.50.12 192.168.50.21 192.168.50.22; do
-    if ssh $SSH_OPTS -i "$SSH_KEY" ubuntu@"$ip" "mountpoint -q /var/lib/one/datastores" 2>/dev/null; then
+    if ssh $SSH_OPTS -i "$SSH_KEY" ubuntu@"$ip" "grep -q '/var/lib/one/datastores' /proc/mounts" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $ip — NFS montado en /var/lib/one/datastores"
     else
-        echo -e "  ${RED}✗${NC} $ip — NFS NO montado"
+        echo -e "  ${RED}✗${NC} $ip — NFS NO montado de forma activa"
     fi
 done
 

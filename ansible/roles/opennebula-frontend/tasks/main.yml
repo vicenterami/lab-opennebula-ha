@@ -19,6 +19,12 @@
       - opennebula-flow
     state: present
     update_cache: yes
+    cache_valid_time: 3600
+  # EVITA COLGUES: Fuerza a APT a ignorar cualquier pregunta interactiva
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  vars:
+    ansible_client_timeout: 600 # Extiende el timeout a 10 minutos si la descarga es lenta
 
 - name: Configurar las credenciales basicas de login para la presentacion (one_auth)
   copy:

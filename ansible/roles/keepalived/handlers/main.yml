@@ -1,5 +1,6 @@
 ---
-- name: Reiniciar libvirtd
+# ansible/roles/keepalived/handlers/main.yml
+- name: Restart Keepalived
   service:
-    name: libvirtd
+    name: keepalived
     state: restarted

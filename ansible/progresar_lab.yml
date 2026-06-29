@@ -1,0 +1,80 @@
+---
+- name: "Paso Final — Configuración Automática de Recursos Cloud OpenNebula"
+  hosts: one-fe1
+  become: false
+  vars:
+    vnet_name: "vnet-laboratorio"
+    bridge_interface: "virbr1"
+    network_address: "192.168.50.0"
+    ip_start: "192.168.50.100"
+    ip_size: "50"
+
+  tasks:
+    - name: "Asegurar soporte de ACL en el sistema (Evita escalación descuidada a root)"
+      apt:
+        name: acl
+        state: present
+      become: true
+
+    # -------------------------------------------------------------------------
+    # OPERACIONES CLOUD (Estrictamente como usuario oneadmin)
+    # -------------------------------------------------------------------------
+
+    - name: "Validar estado de la federación y consenso RAFT"
+      command: onezone show 0
+      register: zone_status
+      changed_when: false
+      become: true
+      become_user: oneadmin
+
+    - name: "Mostrar estado del Consenso RAFT en Consola"
+      debug:
+        msg: "{{ zone_status.stdout_lines }}"
+
+    - name: "Comprobar si la red virtual ya se encuentra registrada"
+      command: onevnet show "{{ vnet_name }}"
+      register: vnet_check
+      failed_when: false  # Evita que el playbook muera si la red NO existe
+      changed_when: false
+      become: true
+      become_user: oneadmin
+
+    - name: "Generar plantilla temporal para la Red Virtual"
+      copy:
+        dest: "/tmp/vnet_template.txt"
+        content: |
+          NAME = "{{ vnet_name }}"
+          VN_MAD = "bridge"
+          BRIDGE = "{{ bridge_interface }}"
+          AR = [
+              TYPE = "IP4",
+              IP = "{{ ip_start }}",
+              SIZE = "{{ ip_size }}"
+          ]
+          NETWORK_ADDRESS = "{{ network_address }}"
+          NETWORK_MASK    = "255.255.255.0"
+          GATEWAY         = "192.168.50.1"
+          DNS             = "1.1.1.1"
+      when: vnet_check.rc != 0  # Solo se genera si el comando 'onevnet show' falló (no existía)
+
+    - name: "Inyectar Red Virtual en el Core del Daemon oned"
+      command: onevnet create /tmp/vnet_template.txt
+      become: true
+      become_user: oneadmin
+      when: vnet_check.rc != 0  # Solo se crea si la red no existía previamente
+
+    - name: "Limpiar plantilla de red temporal"
+      file:
+        path: "/tmp/vnet_template.txt"
+        state: absent
+
+    - name: "Verificar Datastores y Almacenamiento Compartido NFS"
+      command: onedatastore list
+      register: datastore_status
+      changed_when: false
+      become: true
+      become_user: oneadmin
+
+    - name: "Imprimir reporte de Datastores Activos"
+      debug:
+        msg: "{{ datastore_status.stdout_lines }}"
